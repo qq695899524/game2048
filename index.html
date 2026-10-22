@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>2048</title>
+<!-- ===================== 内联 CSS 样式区 ===================== -->
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { height: 100%; }
+body {
+  min-height: 100%;
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  background: #faf8ef;
+  color: #776e65;
+  display: flex;
+  justify-content: center;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#app { width: min(92vw, 480px, 88vh); padding: 16px 0 40px; }
+header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+h1 { font-size: clamp(34px, 9vw, 52px); font-weight: 800; color: #776e65; line-height: 1; }
+.controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.scores { display: flex; gap: 8px; }
+.score-box {
+  background: #bbada0; color: #fff; border-radius: 6px;
+  padding: 5px 14px; text-align: center; min-width: 76px;
+}
+.score-box .label { display: block; font-size: 11px; color: #eee4da; letter-spacing: 2px; }
+.score-box .value { display: block; font-size: 22px; font-weight: 700; }
+#restart-btn {
+  background: #8f7a66; color: #f9f6f2; border: none; border-radius: 6px;
+  padding: 10px 18px; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+#restart-btn:hover { background: #9f8b77; }
+/* 游戏区域：touch-action:none 为阻止触摸滑动引发页面滚动的主防线（spec 5.6.1-2） */
+#game-area { touch-action: none; }
+#board {
+  position: relative; width: 100%; aspect-ratio: 1 / 1;
+  background: #bbada0; border-radius: 8px;
+  padding: var(--board-pad, 10px);
+}
+.grid-bg {
+  position: absolute; inset: var(--board-pad, 10px);
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr);
+  gap: var(--gap, 10px);
+}
+.grid-cell { background: rgba(238, 228, 218, 0.35); border-radius: 6px; }
+#tile-layer { position: absolute; inset: 0; }
+.tile {
+  position: absolute; z-index: 2;
+  transition: transform 100ms ease-in-out; /* 滑动动画 ≤100ms（spec 4.1-2） */
+  will-change: transform;
+}
+#board.no-anim .tile { transition: none; }
+.tile-inner {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 6px; font-weight: 800; background: #eee4da; color: #776e65;
+}
+.tile-2 .tile-inner { background: #eee4da; }
+.tile-4 .tile-inner { background: #ede0c8; }
+.tile-8 .tile-inner { background: #f2b179; color: #f9f6f2; }
+.tile-16 .tile-inner { background: #f59563; color: #f9f6f2; }
+.tile-32 .tile-inner { background: #f67c5f; color: #f9f6f2; }
+.tile-64 .tile-inner { background: #f65e3b; color: #f9f6f2; }
+.tile-128 .tile-inner { background: #edcf72; color: #f9f6f2; box-shadow: 0 0 20px 4px rgba(243, 215, 116, 0.4); }
+.tile-256 .tile-inner { background: #edcc61; color: #f9f6f2; box-shadow: 0 0 24px 6px rgba(243, 215, 116, 0.45); }
+.tile-512 .tile-inner { background: #edc850; color: #f9f6f2; box-shadow: 0 0 28px 8px rgba(243, 215, 116, 0.5); }
+.tile-1024 .tile-inner { background: #edc53f; color: #f9f6f2; box-shadow: 0 0 30px 10px rgba(243, 215, 116, 0.55); }
+.tile-2048 .tile-inner { background: #edc22e; color: #f9f6f2; box-shadow: 0 0 34px 12px rgba(243, 215, 116, 0.6); }
+.tile-super .tile-inner { background: #3c3a32; color: #f9f6f2; }
+/* 新块缩放进入动画（≤100ms） */
+.tile-inner.appear { animation: tile-appear 100ms ease 1; }
+@keyframes tile-appear { from { transform: scale(0); } to { transform: scale(1); } }
+/* 合并弹跳放大动画（≤100ms） */
+.tile-inner.merged { animation: tile-merged 100ms ease 1; }
+@keyframes tile-merged { 0% { transform: scale(1); } 50% { transform: scale(1.22); } 100% { transform: scale(1); } }
+/* 胜利/结束遮罩层 */
+.overlay {
+  position: absolute; inset: 0; z-index: 10;
+  background: rgba(238, 228, 218, 0.92); border-radius: 8px;
+  display: none; flex-direction: column; justify-content: center; align-items: center;
+  gap: 18px; text-align: center; touch-action: manipulation;
+}
+.overlay.show { display: flex; }
+.overlay p { font-size: clamp(26px, 7vw, 40px); font-weight: 800; color: #776e65; }
+.overlay-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.overlay button {
+  background: #8f7a66; color: #f9f6f2; border: none; border-radius: 6px;
+  padding: 10px 20px; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.overlay button:hover { background: #9f8b77; }
+.howto { margin-top: 14px; font-size: 14px; color: #776e65; text-align: center; line-height: 1.6; }
+/* 移动端小屏适配（spec 5.6.1-3：完整可见、无遮挡、无横向滚动） */
+@media (max-width: 480px) {
+  #app { width: 94vw; padding-top: 10px; }
+  .score-box { min-width: 62px; padding: 4px 10px; }
+  .score-box .value { font-size: 18px; }
+  #restart-btn { padding: 8px 14px; font-size: 13px; }
+}
+</style>
+</head>
+<body>
+<!-- ===================== HTML 结构区 ===================== -->
+<div id="app">
+  <header>
+    <h1>2048</h1>
+    <div class="controls">
+      <div class="scores">
+        <div class="score-box"><span class="label">当前分</span><span class="value" id="score-value">0</span></div>
+        <div class="score-box"><span class="label">最高分</span><span class="value" id="best-value">0</span></div>
+      </div>
+      <!-- 常驻重开按钮：对局任意阶段均可用（spec 5.5.1-2） -->
+      <button id="restart-btn" type="button">重新开始</button>
+    </div>
+  </header>
+  <div id="game-area">
+    <div id="board">
+      <div class="grid-bg" id="grid-bg"></div>
+      <div id="tile-layer"></div>
+      <!-- 胜利遮罩：继续游戏 / 重新开始（spec 5.4.1-2） -->
+      <div class="overlay" id="won-overlay">
+        <p>合成 2048，你赢了！</p>
+        <div class="overlay-btns">
+          <button id="continue-btn" type="button">继续游戏</button>
+          <button id="restart-won-btn" type="button">重新开始</button>
+        </div>
+      </div>
+      <!-- 结束遮罩：重新开始（spec 5.4.1-1） -->
+      <div class="overlay" id="over-overlay">
+        <p>游戏结束</p>
+        <div class="overlay-btns">
+          <button id="restart-over-btn" type="button">重新开始</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="howto">方向键 / WASD / 滑动屏幕移动方块，相同数字碰撞合并，冲向 2048！</p>
+</div>
+
+<!-- ===================== 内联 JS 脚本区 ===================== -->
+<script>
+(function () {
+  'use strict';
+
+  /* ========== 配置常量（集中定义，调整规则仅改此处） ========== */
+  var SIZE = 4;                // 棋盘尺寸 4×4（spec 1.4-4）
+  var PROBABILITY_FOUR = 0.1;  // 新方块为 4 的概率 10%（spec 5.3.1-2）
+  var INITIAL_TILE_COUNT = 2;  // 开局初始方块数（spec 5.1.1-1）
+  var WIN_TARGET = 2048;       // 胜利目标值
+  var ANIMATION_MS = 100;      // 动画时长上限 100ms（spec 4.1-2）
+  var TOUCH_THRESHOLD = 30;    // 手势最小位移阈值 px（spec 5.6.3-1）
+  var MAX_TILE_VALUE = 131072; // 单局理论数值上限 2^17（spec 6.2-3）
+
+  /* ========== JSDoc 核心类型定义（设计决策 D5） ==========
+   * @typedef {('up'|'down'|'left'|'right')} Direction
+   * @typedef {{row:number, col:number}} Cell
+   * @typedef {{value:number, row:number, col:number,
+   *            previousPosition:(Cell|null),
+   *            mergedFrom:(Array<Tile>|null),
+   *            id:number}} Tile
+   * @typedef {{moved:boolean, scoreGained:number}} MoveResult
+   * @typedef {{score:number, best:number, over:boolean,
+   *            won:boolean, terminated:boolean}} GameMetadata
+   * ========================================================= */
+
+  /* ========== 纯领域层：零 DOM 依赖（设计决策 D1） ========== */
+
+  /** 方向向量 */
+  var VECTORS = {
+    up:    { row: -1, col: 0 },
+    down:  { row: 1,  col: 0 },
+    left:  { row: 0,  col: -1 },
+    right: { row: 0,  col: 1 }
+  };
+
+  /** 方块身份标识单调递增序号（设计决策 D3：DOM 跨帧复用绑定键） */
+  var TILE_ID_SEQ = 0;
+
+  /**
+   * 方块：value 恒为 2 的正整数次幂且 ≤131072（spec 6.2）
+   * @constructor
+   * @param {Cell} cell
+   * @param {number} value
+   */
+  function Tile(cell, value) {
+    if (typeof value !== 'number' || value < 2 || value > MAX_TILE_VALUE ||
+        (value & (value - 1)) !== 0) {
+      throw new Error('非法方块数值: ' + value);
+    }
+    this.row = cell.row;
+    this.col = cell.col;
+    this.value = value;
+    this.previousPosition = null;
+    this.mergedFrom = null;
+    this.id = ++TILE_ID_SEQ;
+  }
+
+  /** 更新当前位置（渲染据此计算位移） */
+  Tile.prototype.updatePosition = function (cell) {
+    this.row = cell.row;
+    this.col = cell.col;
+  };
+
+  /** 结算完成后固化位置，作为下一回合的"原位"基准 */
+  Tile.prototype.savePosition = function () {
+    this.previousPosition = { row: this.row, col: this.col };
+  };
+
+  /**
+   * 网格：4×4 单元格容器，每格至多 1 个方块（spec 6.2-2 位置唯一性）
+   * @constructor
+   * @param {number} size
+   */
+  function Grid(size) {
+    this.size = size;
+    this.cells = this.empty();
+  }
+
+  Grid.prototype.empty = function () {
+    var cells = [];
+    for (var r = 0; r < this.size; r++) {
+      var row = [];
+      for (var c = 0; c < this.size; c++) { row.push(null); }
+      cells.push(row);
+    }
+    return cells;
+  };
+
+  /** 坐标是否在棋盘范围内 */
+  Grid.prototype.withinBounds = function (cell) {
+    return cell.row >= 0 && cell.row < this.size &&
+           cell.col >= 0 && cell.col < this.size;
+  };
+
+  /** 查询单元格内容（空返回 null） */
+  Grid.prototype.cellContent = function (cell) {
+    if (this.withinBounds(cell)) { return this.cells[cell.row][cell.col]; }
+    return null;
+  };
+
+  /** 单元格是否为空 */
+  Grid.prototype.cellEmpty = function (cell) {
+    return this.cellContent(cell) === null;
+  };
+
+  /** 插入方块（前置条件：目标格必须为空） */
+  Grid.prototype.insertTile = function (tile) {
+    this.cells[tile.row][tile.col] = tile;
+  };
+
+  /** 移除方块（insertTile 的对偶操作） */
+  Grid.prototype.removeTile = function (tile) {
+    this.cells[tile.row][tile.col] = null;
+  };
+
+  /** 全部空单元格列表（供新块等概率选取） */
+  Grid.prototype.availableCells = function () {
+    var cells = [];
+    this.eachCell(function (row, col) {
+      if (this.cells[row][col] === null) { cells.push({ row: row, col: col }); }
+    });
+    return cells;
+  };
+
+  Grid.prototype.eachCell = function (callback) {
+    for (var r = 0; r < this.size; r++) {
+      for (var c = 0; c < this.size; c++) {
+        callback.call(this, r, c);
+      }
+    }
+  };
+
+  /** 遍历全部存活方块 */
+  Grid.prototype.eachTile = function (callback) {
+    this.eachCell(function (row, col) {
+      var tile = this.cells[row][col];
+      if (tile) { callback(tile, row, col); }
+    });
+  };
+
+  /**
+   * 游戏结束判定的唯一依据（spec 5.4.1-1）：
+   * 存在空单元格，或任一横向/纵向相邻同值方块对 → 可继续
+   */
+  Grid.prototype.movesAvailable = function () {
+    if (this.availableCells().length > 0) { return true; }
+    for (var r = 0; r < this.size; r++) {
+      for (var c = 0; c < this.size; c++) {
+        var tile = this.cells[r][c];
+        if (tile) {
+          var right = this.cellContent({ row: r, col: c + 1 });
+          var below = this.cellContent({ row: r + 1, col: c });
+          if (right && right.value === tile.value) { return true; }
+          if (below && below.value === tile.value) { return true; }
+        }
+      }
+    }
+    return false;
+  };
+
+  /**
+   * 移动合并引擎：按方向确定遍历顺序（自滑动目标侧向源侧，
+   * 保证"合并块置于滑动方向前端"与 [2,2,2,2]→[空,空,4,4] 规则）
+   * @param {Direction} direction
+   * @returns {{rows:number[], cols:number[]}}
+   */
+  function buildTraversals(direction) {
+    var rows = [], cols = [];
+    for (var i = 0; i < SIZE; i++) { rows.push(i); cols.push(i); }
+    if (direction === 'down')  { rows.reverse(); }
+    if (direction === 'right') { cols.reverse(); }
+    return { rows: rows, cols: cols };
+  }
+
+  /**
+   * 计算方块沿方向向量的最远可达空位及再前进一格的位置
+   * @param {Grid} grid
+   * @param {Cell} cell
+   * @param {{row:number,col:number}} vector
+   * @returns {{farthest:Cell, next:Cell}}
+   */
+  function findFarthestPosition(grid, cell, vector) {
+    var previous, current = { row: cell.row, col: cell.col };
+    do {
+      previous = current;
+      current = { row: previous.row + vector.row, col: previous.col + vector.col };
+    } while (grid.withinBounds(current) && grid.cellEmpty(current));
+    return { farthest: previous, next: current };
+  }
+
+  /**
+   * 手势方向判定（纯函数，供测试）：
+   * 位移小于阈值判为误触返回 null；否则取 |dx| 与 |dy| 较大者为主轴
+   * @param {number} dx
+   * @param {number} dy
+   * @returns {(Direction|null)}
+   */
+  function getSwipeDirection(dx, dy) {
+    if (Math.abs(dx) < TOUCH_THRESHOLD && Math.abs(dy) < TOUCH_THRESHOLD) {
+      return null;
+    }
+    if (Math.abs(dx) > Math.abs(dy)) {
+      return dx > 0 ? 'right' : 'left';
+    }
+    return dy > 0 ? 'down' : 'up';
+  }
+
+  /* ========== 持久化层：localStorage 容错适配 ========== */
+
+  /**
+   * StorageManager：读写均 try-catch 包装；
+   * 读取值做非负整数校验，非法按 0 处理（spec 5.5.3-1）；
+   * 写入失败静默降级，不回滚游戏状态（spec 4.2-3）
+   * @constructor
+   */
+  function StorageManager() {
+    this.key = 'bestScore2048';
+  }
+
+  /** @returns {number} 历史最高分（非法/异常一律返回 0） */
+  StorageManager.prototype.getBestScore = function () {
+    try {
+      var raw = window.localStorage.getItem(this.key);
+      if (raw === null) { return 0; }
+      var n = Number(raw); /* 用 Number 保留小数信息，杜绝 parseInt 截断伪合法 */
+      if (!isFinite(n) || n < 0 || Math.floor(n) !== n) { return 0; }
+      return n;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  /** @param {number} score 非负整数 */
+  StorageManager.prototype.setBestScore = function (score) {
+    try {
+      window.localStorage.setItem(this.key, String(score));
+    } catch (e) { /* 静默降级：内存态最高分保留，本局可玩 */ }
+  };
+
+  /* ========== 渲染层：Actuator（唯一 DOM 出口） ========== */
+
+  /**
+   * @constructor
+   */
+  function Actuator() {
+    this.boardEl = document.getElementById('board');
+    this.tileLayer = document.getElementById('tile-layer');
+    this.scoreEl = document.getElementById('score-value');
+    this.bestEl = document.getElementById('best-value');
+    this.wonOverlay = document.getElementById('won-overlay');
+    this.overOverlay = document.getElementById('over-overlay');
+    this.tileNodes = new Map(); /* tile.id → DOM 节点，跨结算帧复用（决策 D3） */
+    this.buildBackground();
+    this.measure();
+  }
+
+  /** 生成 16 个背景格 */
+  Actuator.prototype.buildBackground = function () {
+    var bg = document.getElementById('grid-bg');
+    for (var i = 0; i < SIZE * SIZE; i++) {
+      var cell = document.createElement('div');
+      cell.className = 'grid-cell';
+      bg.appendChild(cell);
+    }
+  };
+
+  /** 测量棋盘尺寸并同步 CSS 变量（背景格与方块网格共用同一 gap） */
+  Actuator.prototype.measure = function () {
+    var w = this.boardEl.clientWidth;
+    var gap = w > 420 ? 10 : (w > 300 ? 8 : 6);
+    var pad = gap;
+    var cell = (w - 2 * pad - 3 * gap) / SIZE;
+    this.metrics = { gap: gap, pad: pad, cell: cell };
+    this.boardEl.style.setProperty('--gap', gap + 'px');
+    this.boardEl.style.setProperty('--board-pad', pad + 'px');
+  };
+
+  /** 计算单元格的像素坐标 */
+  Actuator.prototype.positionForCell = function (row, col) {
+    var m = this.metrics;
+    return { x: m.pad + col * (m.cell + m.gap), y: m.pad + row * (m.cell + m.gap) };
+  };
+
+  /**
+   * 将逻辑状态投影为界面：tile DOM 复用与滑动动画、
+   * 新块/合并动画、分数刷新、遮罩显隐
+   * @param {Grid} grid
+   * @param {GameMetadata} meta
+   */
+  Actuator.prototype.actuate = function (grid, meta) {
+    var self = this;
+    this.measure();
+    /* 1. 分数实时刷新（spec 5.5.1-1） */
+    this.scoreEl.textContent = meta.score;
+    this.bestEl.textContent = meta.best;
+    /* 2. 清理已消亡 tile 的节点（被合并吞并 / 重开清空） */
+    var alive = {};
+    grid.eachTile(function (tile) { alive[tile.id] = true; });
+    this.tileNodes.forEach(function (el, id) {
+      if (!alive[id]) { el.remove(); self.tileNodes.delete(id); }
+    });
+    /* 3. 渲染存活 tile（isNew 判定须在节点创建前完成） */
+    grid.eachTile(function (tile) {
+      var el = self.tileNodes.get(tile.id);
+      var isNew = !el;
+      if (isNew) {
+        el = document.createElement('div');
+        var inner = document.createElement('div');
+        inner.className = 'tile-inner';
+        el.appendChild(inner);
+        self.tileLayer.appendChild(el);
+        self.tileNodes.set(tile.id, el);
+      }
+      var innerEl = el.firstChild;
+      var cls = 'tile' + (tile.value <= 2048 ? ' tile-' + tile.value : ' tile-super');
+      el.className = cls;
+      innerEl.textContent = tile.value;
+      var len = String(tile.value).length;
+      var ratio = len <= 2 ? 0.42 : (len === 3 ? 0.34 : 0.27);
+      innerEl.style.fontSize = Math.round(self.metrics.cell * ratio) + 'px';
+      el.style.width = self.metrics.cell + 'px';
+      el.style.height = self.metrics.cell + 'px';
+      var pos = self.positionForCell(tile.row, tile.col);
+      el.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      /* 动画类型调度：合并弹跳 > 新块缩放进入 > 纯滑动（transform 过渡自动完成） */
+      if (tile.mergedFrom) {
+        innerEl.classList.remove('appear', 'merged');
+        void innerEl.offsetWidth; /* 强制重排以重触发动画 */
+        innerEl.classList.add('merged');
+      } else if (isNew || !tile.previousPosition) {
+        innerEl.classList.remove('appear', 'merged');
+        void innerEl.offsetWidth;
+        innerEl.classList.add('appear');
+      }
+    });
+    /* 4. 遮罩显隐：over 优先，其次胜利待选（允许动画结束后呈现） */
+    this.overOverlay.classList.toggle('show', meta.over);
+    this.wonOverlay.classList.toggle('show', !meta.over && meta.won && meta.terminated);
+  };
+
+  /* ========== 输入层：InputManager（move/restart 两类订阅契约） ========== */
+
+  /** 键映射：方向键 + WASD（大小写均识别），仅这 8 键被拦截 */
+  var KEY_MAP = {
+    ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+    w: 'up', W: 'up', s: 'down', S: 'down',
+    a: 'left', A: 'left', d: 'right', D: 'right'
+  };
+
+  /**
+   * @constructor
+   */
+  function InputManager() {
+    this.events = { move: [], restart: [] };
+    var self = this;
+    /* 键盘：仅对 8 个游戏按键 preventDefault，其余放行（设计 1.1.2） */
+    document.addEventListener('keydown', function (e) {
+      var dir = KEY_MAP[e.key];
+      if (dir) {
+        e.preventDefault();
+        self.emit('move', dir);
+      }
+    });
+    /* 触摸手势：touch-action:none 为主防线，此处显式 passive:false 为辅助防线 */
+    var area = document.getElementById('game-area');
+    var startX = 0, startY = 0, tracking = false;
+    area.addEventListener('touchstart', function (e) {
+      if (e.changedTouches.length) {
+        tracking = true;
+        startX = e.changedTouches[0].clientX;
+        startY = e.changedTouches[0].clientY;
+      }
+    }, { passive: true });
+    area.addEventListener('touchmove', function (e) {
+      if (tracking) { e.preventDefault(); } /* 阻断滑动期间的页面滚动（双保险） */
+    }, { passive: false });
+    area.addEventListener('touchend', function (e) {
+      if (!tracking) { return; }
+      tracking = false;
+      var dx = e.changedTouches[0].clientX - startX;
+      var dy = e.changedTouches[0].clientY - startY;
+      var dir = getSwipeDirection(dx, dy);
+      if (dir) {
+        e.preventDefault();
+        self.emit('move', dir);
+      }
+    }, { passive: false });
+    /* 重开入口：常驻按钮 + 遮罩内按钮 */
+    ['restart-btn', 'restart-won-btn', 'restart-over-btn'].forEach(function (id) {
+      var btn = document.getElementById(id);
+      if (btn) { btn.addEventListener('click', function () { self.emit('restart'); }); }
+    });
+  }
+
+  /** 订阅事件：'move' | 'restart' */
+  InputManager.prototype.on = function (event, callback) {
+    if (this.events[event]) { this.events[event].push(callback); }
+  };
+
+  InputManager.prototype.emit = function (event, arg) {
+    var handlers = this.events[event] || [];
+    for (var i = 0; i < handlers.length; i++) {
+      try { handlers[i](arg); } catch (e) { /* 事件层吞掉异常，棋盘保持可用 */ }
+    }
+  };
+
+  /* ========== 对局编排层：GameManager（状态机） ========== */
+
+  /**
+   * @constructor
+   * @param {Actuator} actuator
+   * @param {StorageManager} storage
+   */
+  function GameManager(actuator, storage) {
+    this.actuator = actuator;
+    this.storage = storage;
+    this.best = storage.getBestScore();
+    this.restart();
+  }
+
+  /** 对局是否处于终局（胜利待选或结束） */
+  GameManager.prototype.isGameTerminated = function () {
+    return this.over || (this.won && !this.keepPlaying);
+  };
+
+  /** 开局/重开：空盘 + 2 个初始方块 + 当前分归零 + 最高分保留（spec 5.1.1） */
+  GameManager.prototype.restart = function () {
+    this.grid = new Grid(SIZE);
+    this.score = 0;
+    this.over = false;
+    this.won = false;
+    this.keepPlaying = true;
+    for (var i = 0; i < INITIAL_TILE_COUNT; i++) { this.addRandomTile(); }
+    this.actuate();
+  };
+
+  /** 新方块生成器：空格中等概率选 1 格，90%/10% 生成 2/4（spec 5.3.1） */
+  GameManager.prototype.addRandomTile = function () {
+    var cells = this.grid.availableCells();
+    if (cells.length) {
+      var cell = cells[Math.floor(Math.random() * cells.length)];
+      var value = Math.random() < PROBABILITY_FOUR ? 4 : 2;
+      this.grid.insertTile(new Tile(cell, value));
+    }
+  };
+
+  /**
+   * 结算一次完整移动（滑动→合并→计分→新块→胜负判定→渲染通知），
+   * 单次同步调用内原子完成（设计决策 D1）；无效移动零副作用（spec 5.2.1-5）
+   * @param {Direction} direction
+   * @returns {MoveResult}
+   */
+  GameManager.prototype.move = function (direction) {
+    if (this.isGameTerminated()) {
+      return { moved: false, scoreGained: 0 };
+    }
+    var self = this;
+    var vector = VECTORS[direction];
+    if (!vector) { return { moved: false, scoreGained: 0 }; }
+    var traversals = buildTraversals(direction);
+    var moved = false;
+    var scoreGained = 0;
+    /* 准备阶段：固化原位，清空合并标记 */
+    this.grid.eachTile(function (tile) {
+      tile.savePosition();
+      tile.mergedFrom = null;
+    });
+    /* 结算阶段：自滑动目标侧向源侧遍历 */
+    traversals.rows.forEach(function (row) {
+      traversals.cols.forEach(function (col) {
+        var tile = self.grid.cellContent({ row: row, col: col });
+        if (!tile) { return; }
+        var pos = findFarthestPosition(self.grid, { row: row, col: col }, vector);
+        var next = self.grid.cellContent(pos.next);
+        if (next && next.value === tile.value && !next.mergedFrom) {
+          /* 同值碰撞合并：新块置于滑动方向前端（即 next 格）；
+           * mergedFrom 非空即"本回合已合并"标记，防止二次合并（spec 5.2.1-3/6）。
+           * 注意：必须先移除两个来源方块，再插入合并块（同格写入需有序） */
+          var merged = new Tile(pos.next, tile.value * 2);
+          merged.mergedFrom = [tile, next];
+          self.grid.removeTile(tile);
+          self.grid.removeTile(next);
+          self.grid.insertTile(merged);
+          scoreGained += merged.value;
+          moved = true;
+          if (merged.value === WIN_TARGET && !self.won) {
+            /* 首次合成 2048：进入胜利态并等待玩家选择（spec 5.4.1-2） */
+            self.won = true;
+            self.keepPlaying = false;
+          }
+        } else {
+          if (pos.farthest.row !== tile.row || pos.farthest.col !== tile.col) {
+            moved = true;
+          }
+          self.grid.removeTile(tile);
+          tile.updatePosition(pos.farthest);
+          self.grid.insertTile(tile);
+        }
+      });
+    });
+    if (moved) {
+      /* 计分与最高分刷新（仅在超出时持久化，spec 5.4.1-4） */
+      this.score += scoreGained;
+      if (this.score > this.best) {
+        this.best = this.score;
+        this.storage.setBestScore(this.best);
+      }
+      /* 有效移动后恰生成 1 个新方块（spec 5.3.1-1/4） */
+      this.addRandomTile();
+      /* 结束判定：以逻辑状态为准（spec 5.4.1-1/5.4.3-1） */
+      if (!this.grid.movesAvailable()) { this.over = true; }
+      this.actuate();
+    }
+    return { moved: moved, scoreGained: scoreGained };
+  };
+
+  /** 渲染通知 */
+  GameManager.prototype.actuate = function () {
+    this.actuator.actuate(this.grid, {
+      score: this.score,
+      best: this.best,
+      over: this.over,
+      won: this.won,
+      terminated: this.isGameTerminated()
+    });
+  };
+
+  /* ========== 启动组装 ========== */
+
+  function boot() {
+    var actuator = new Actuator();
+    var storage = new StorageManager();
+    var game = new GameManager(actuator, storage);
+    var input = new InputManager();
+    input.on('move', function (direction) { game.move(direction); });
+    input.on('restart', function () { game.restart(); });
+    /* 胜利遮罩"继续游戏"：won 终身置位，此后不再弹出（spec 5.4.1-3） */
+    var continueBtn = document.getElementById('continue-btn');
+    continueBtn.addEventListener('click', function () {
+      game.keepPlaying = true;
+      game.actuate();
+    });
+    /* 视口变化时重算布局（临时禁用过渡避免抖动） */
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      actuator.boardEl.classList.add('no-anim');
+      game.actuate();
+      if (resizeTimer) { clearTimeout(resizeTimer); }
+      resizeTimer = setTimeout(function () {
+        actuator.boardEl.classList.remove('no-anim');
+      }, 120);
+    });
+  }
+
+  /* 测试导出钩子：浏览器中 window.__2048_TEST__ 不存在，完全无副作用 */
+  if (typeof window !== 'undefined' && window.__2048_TEST__) {
+    window.__2048 = {
+      SIZE: SIZE, WIN_TARGET: WIN_TARGET, TOUCH_THRESHOLD: TOUCH_THRESHOLD,
+      Tile: Tile, Grid: Grid, VECTORS: VECTORS,
+      buildTraversals: buildTraversals,
+      findFarthestPosition: findFarthestPosition,
+      getSwipeDirection: getSwipeDirection,
+      StorageManager: StorageManager, GameManager: GameManager
+    };
+  }
+
+  if (typeof document !== 'undefined' &&
+      document.getElementById && document.getElementById('board')) {
+    boot();
+  }
+})();
+</script>
+</body>
+</html>
